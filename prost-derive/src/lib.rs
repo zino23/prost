@@ -11,7 +11,7 @@ use proc_macro2::{Span, TokenStream};
 use quote::quote;
 use syn::{
     punctuated::Punctuated, Data, DataEnum, DataStruct, DeriveInput, Expr, Fields, FieldsNamed,
-    FieldsUnnamed, Ident, Index, Variant,
+    FieldsUnnamed, Ident, Index, Type::Path, TypePath, Variant,
 };
 
 mod field;
@@ -55,24 +55,29 @@ fn try_message(input: TokenStream) -> Result<TokenStream, Error> {
         } => (false, Vec::new()),
     };
 
+    let mut skipped = vec![];
     let mut next_tag: u32 = 1;
     let mut fields = fields
         .into_iter()
         .enumerate()
         .flat_map(|(i, field)| {
-            let field_ident = field.ident.map(|x| quote!(#x)).unwrap_or_else(|| {
+            let field_ident = field.ident.clone().map(|x| quote!(#x)).unwrap_or_else(|| {
                 let index = Index {
                     index: i as u32,
                     span: Span::call_site(),
                 };
                 quote!(#index)
             });
-            match Field::new(field.attrs, Some(next_tag)) {
+            match Field::new(field.attrs.clone(), Some(next_tag)) {
                 Ok(Some(field)) => {
                     next_tag = field.tags().iter().max().map(|t| t + 1).unwrap_or(next_tag);
                     Some(Ok((field_ident, field)))
                 }
-                Ok(None) => None,
+                Ok(None) => {
+                    // No need to increment `next_tag` for skipped field.
+                    skipped.push((field_ident, field.ty));
+                    None
+                }
                 Err(err) => Some(Err(
                     err.context(format!("invalid message field {}.{}", ident, field_ident))
                 )),
@@ -144,8 +149,21 @@ fn try_message(input: TokenStream) -> Result<TokenStream, Error> {
             let value = field.default();
             quote!(#field_ident: #value,)
         });
+        let skipped = skipped.iter().map(|(field_ident, ty)| {
+            let ty = match ty {
+                Path(TypePath {
+                    path: syn::Path { segments, .. },
+                    ..
+                }) => segments.last().unwrap().ident.clone(),
+                _ => {
+                    unimplemented!()
+                }
+            };
+            quote!(#field_ident: <#ty as Default>::default(),)
+        });
         quote! {#ident {
             #(#default)*
+            #(#skipped)*
         }}
     } else {
         let default = fields.iter().map(|(_, field)| {

@@ -47,6 +47,8 @@ impl Field {
             Field::Oneof(field)
         } else if let Some(field) = group::Field::new(&attrs, inferred_tag)? {
             Field::Group(field)
+        } else if attrs.iter().any(|a| a.path().is_ident("skip")) {
+            return Ok(None);
         } else {
             bail!("no type attribute");
         };
