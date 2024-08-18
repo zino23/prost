@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [ "master" ]
+    branches: [ "master", "feat-support-skipping-fields-with-annotations-plus-cicd"]
   pull_request:
   merge_group:
     branches: [ "master" ]
