@@ -11,7 +11,7 @@ use proc_macro2::{Span, TokenStream};
 use quote::quote;
 use syn::{
     punctuated::Punctuated, Data, DataEnum, DataStruct, DeriveInput, Expr, Fields, FieldsNamed,
-    FieldsUnnamed, Ident, Index, Variant,
+    FieldsUnnamed, Ident, Index, Type::Path, TypePath, Variant,
 };
 
 mod field;
@@ -20,6 +20,8 @@ use crate::field::Field;
 fn try_message(input: TokenStream) -> Result<TokenStream, Error> {
     let input: DeriveInput = syn::parse2(input)?;
 
+    println!("check input: {:#?}", input);
+
     let ident = input.ident;
 
     syn::custom_keyword!(skip_debug);
@@ -27,6 +29,8 @@ fn try_message(input: TokenStream) -> Result<TokenStream, Error> {
         .attrs
         .into_iter()
         .any(|a| a.path().is_ident("prost") && a.parse_args::<skip_debug>().is_ok());
+
+    println!("skip_debug={}", skip_debug);
 
     let variant_data = match input.data {
         Data::Struct(variant_data) => variant_data,
@@ -55,30 +59,40 @@ fn try_message(input: TokenStream) -> Result<TokenStream, Error> {
         } => (false, Vec::new()),
     };
 
+    let mut skipped = vec![];
     let mut next_tag: u32 = 1;
     let mut fields = fields
         .into_iter()
         .enumerate()
         .flat_map(|(i, field)| {
-            let field_ident = field.ident.map(|x| quote!(#x)).unwrap_or_else(|| {
+            let field_ident = field.ident.clone().map(|x| quote!(#x)).unwrap_or_else(|| {
                 let index = Index {
                     index: i as u32,
                     span: Span::call_site(),
                 };
                 quote!(#index)
             });
-            match Field::new(field.attrs, Some(next_tag)) {
+            match Field::new(field.attrs.clone(), Some(next_tag)) {
                 Ok(Some(field)) => {
                     next_tag = field.tags().iter().max().map(|t| t + 1).unwrap_or(next_tag);
                     Some(Ok((field_ident, field)))
                 }
-                Ok(None) => None,
+                Ok(None) => {
+                    println!("skipped field: {:#?}, {:#?}", field, field_ident);
+                    skipped.push((field_ident, field.ty));
+                    None
+                }
                 Err(err) => Some(Err(
                     err.context(format!("invalid message field {}.{}", ident, field_ident))
                 )),
             }
         })
         .collect::<Result<Vec<_>, _>>()?;
+
+    println!("check created protobuf Fields");
+    for (i, f) in fields.iter().enumerate() {
+        println!("{}:{}", i, f.1.debug(quote! {}))
+    }
 
     // We want Debug to be in declaration order
     let unsorted_fields = fields.clone();
@@ -103,6 +117,7 @@ fn try_message(input: TokenStream) -> Result<TokenStream, Error> {
         )
     };
 
+    println!("1");
     let encoded_len = fields
         .iter()
         .map(|(field_ident, field)| field.encoded_len(quote!(self.#field_ident)));
@@ -144,8 +159,21 @@ fn try_message(input: TokenStream) -> Result<TokenStream, Error> {
             let value = field.default();
             quote!(#field_ident: #value,)
         });
+        let skipped = skipped.iter().map(|(field_ident, ty)| {
+            let ty = match ty {
+                Path(TypePath {
+                    path: syn::Path { segments, .. },
+                    ..
+                }) => segments.last().unwrap().ident.clone(),
+                _ => {
+                    unimplemented!()
+                }
+            };
+            quote!(#field_ident: <#ty as Default>::default(),)
+        });
         quote! {#ident {
             #(#default)*
+            #(#skipped)*
         }}
     } else {
         let default = fields.iter().map(|(_, field)| {

@@ -34,6 +34,7 @@ impl Field {
     /// If the field should be ignored, `None` is returned.
     pub fn new(attrs: Vec<Attribute>, inferred_tag: Option<u32>) -> Result<Option<Field>, Error> {
         let attrs = prost_attrs(attrs)?;
+        println!("check field attrs: {:#?}", attrs);
 
         // TODO: check for ignore attribute.
 
@@ -47,6 +48,9 @@ impl Field {
             Field::Oneof(field)
         } else if let Some(field) = group::Field::new(&attrs, inferred_tag)? {
             Field::Group(field)
+        } else if attrs.iter().any(|a| a.path().is_ident("skip")) {
+            println!("skipped field with attrs: {:#?}", attrs);
+            return Ok(None);
         } else {
             bail!("no type attribute");
         };

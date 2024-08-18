@@ -26,6 +26,7 @@ impl Field {
         let mut unknown_attrs = Vec::new();
 
         for attr in attrs {
+            println!("check meta: {:#?}", attr);
             if let Some(t) = Ty::from_attr(attr)? {
                 set_option(&mut ty, t, "duplicate type attributes")?;
             } else if let Some(p) = bool_attr("packed", attr)? {
