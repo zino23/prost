@@ -170,8 +170,21 @@ fn try_message(input: TokenStream) -> Result<TokenStream, Error> {
             let value = field.default();
             quote!(#value,)
         });
+        let skipped = skipped.iter().map(|(_, ty)| {
+            let ty = match ty {
+                Path(TypePath {
+                    path: syn::Path { segments, .. },
+                    ..
+                }) => segments.last().unwrap().ident.clone(),
+                _ => {
+                    unimplemented!()
+                }
+            };
+            quote!(<#ty as Default>::default(),)
+        });
         quote! {#ident (
             #(#default)*
+            #(#skipped)*
         )}
     };
 
